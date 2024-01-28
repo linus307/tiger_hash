@@ -1,14 +1,13 @@
+use byteorder::{ByteOrder, LittleEndian};
 use std::num::Wrapping;
 
-type Chunk = u64;
+pub const TIGER_PASSES: usize = 3;
 
-pub const TIGER_PASSES: u32 = 3;
+const WRAPPED_FF: Wrapping<u64> = Wrapping(0xFF);
 
-const WRAPPED_FF : Wrapping<u64> = Wrapping(0xFF);
+const IS_LITTLE_ENDIAN: bool = cfg!(target_endian = "little");
 
-const IS_LITTLE_ENDIAN : bool = cfg!(target_endian = "little");
-
-pub const START_VALUES : [u64; 3] = [0x0123456789ABCDEF, 0xFEDCBA9876543210, 0xF096A5B4C3B2E187];
+pub const START_VALUES: [u64; 3] = [0x0123456789ABCDEF, 0xFEDCBA9876543210, 0xF096A5B4C3B2E187];
 
 pub fn compress_with_sbox(char: [u64; 8], state: &mut [u64; 3], sboxes: [[u8; 8]; 1024]) {
     let (mut a, mut b, mut c) = (Wrapping(state[0]), Wrapping(state[1]), Wrapping(state[2]));
@@ -48,7 +47,15 @@ pub fn compress_with_sbox(char: [u64; 8], state: &mut [u64; 3], sboxes: [[u8; 8]
             x6 += x5;
             x7 -= x6 ^ Wrapping(0x0123456789ABCDEF);
         }
-        let mul = Wrapping(if pass_no == 0 { 5 } else { if pass_no == 1 { 7 } else { 9 } });
+        let mul = Wrapping(if pass_no == 0 {
+            5
+        } else {
+            if pass_no == 1 {
+                7
+            } else {
+                9
+            }
+        });
         round(&mut a, &mut b, &mut c, x0, mul, sb1, sb2, sb3, sb4);
         round(&mut b, &mut c, &mut a, x1, mul, sb1, sb2, sb3, sb4);
         round(&mut c, &mut a, &mut b, x2, mul, sb1, sb2, sb3, sb4);
@@ -95,11 +102,35 @@ fn read_u64(bytes: &[u8]) -> u64 {
     <byteorder::LittleEndian as byteorder::ByteOrder>::read_u64(bytes)
 }
 
-pub fn readChunks(bytes: [u8;64]) -> [u64; 8] {
-    (0..8).map(|i| {
-        let mut slice = if !IS_LITTLE_ENDIAN { bytes[63 - (i+1)*8.. 63 - i*8].to_vec() } else { bytes[i*8..(i+1)*8].to_vec() };
-        if !IS_LITTLE_ENDIAN { slice.reverse() };
-        <byteorder::LittleEndian as byteorder::ByteOrder>::read_u64(&slice)
-    })
-    .collect::<Vec<u64>>().try_into().unwrap()
+pub fn readChunks(bytes: [u8; 64]) -> [u64; 8] {
+    (0..8)
+        .map(|i| {
+            let mut slice = if !IS_LITTLE_ENDIAN {
+                bytes[63 - (i + 1) * 8..63 - i * 8].to_vec()
+            } else {
+                bytes[i * 8..(i + 1) * 8].to_vec()
+            };
+            if !IS_LITTLE_ENDIAN {
+                slice.reverse()
+            };
+            LittleEndian::read_u64(&slice)
+        })
+        .collect::<Vec<u64>>()
+        .try_into()
+        .unwrap()
+}
+
+pub fn writeChunks(chunks: [u64; 8]) -> [u8; 64] {
+    let mut bytes = [0u8; 64];
+    for (i, &chunk) in chunks.iter().enumerate() {
+        let start = i * 8;
+        let end = start + 8;
+        if !IS_LITTLE_ENDIAN {
+            LittleEndian::write_u64_into(&[chunk], &mut bytes[start..end]);
+            bytes.reverse();
+        } else {
+            LittleEndian::write_u64_into(&[chunk], &mut bytes[start..end]);
+        }
+    }
+    bytes
 }
